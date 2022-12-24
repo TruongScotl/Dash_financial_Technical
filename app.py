@@ -26,19 +26,18 @@ app = Dash(__name__, external_stylesheets=external_stylesheets)
 
 # Apple stock
 df_apple = yf.download('AAPL', 
-                        start='2018-01-01',
-                        end='2018-12-31',
+                        start='2021-01-01',
+                        end='2021-12-31',
                         progress=False,
                         auto_adjust=True)
-# fig = cf.QuantFig(df_apple, title="Apple's Stock Price",
-#                 legend='Top', name='APPL')
+
 fig = go.Figure(data=[go.Candlestick(x=df_apple.index,
                 open=df_apple['Open'],
                 high=df_apple['High'],
                 low=df_apple['Low'],
                 close=df_apple['Close'])])
 
-#fig.add_volume()
+list_stock = ['AAPL', 'GOOG', 'META']
 
 #boilinger_bands
 #fig.add_bollinger_bands(periods=20,boll_std=2,colors=['magenta','grey'],fill=True)
@@ -65,7 +64,6 @@ app.layout = html.Div(children=[
     html.Div([
 
         html.Div(children='''
-            Dash: A web application framework for Python.
         '''),
 
         # dcc.Graph(
@@ -75,7 +73,22 @@ app.layout = html.Div(children=[
     ]),
     # New Div for all elements in the new 'row' of the page
     html.Div([
-        dbc.Row([
+        dbc.Row([   
+                    dbc.Row([                    
+                    dbc.Col([
+
+                        html.Label('Select the stock to be displayed'),
+                       #    dcc.Dropdown(available_countries, 'Canada', id='clientside-graph-country'), 
+                        dcc.Dropdown(list_stock,
+                            id='stocks-dropdown',
+                            value='AAPL',
+                            className="disabled",
+                            style={'margin-right': '20px'},
+                            searchable=False
+                        )
+                    ], width=6)
+                ]),
+
                     dbc.Col([
                         dcc.Loading(
                             [dcc.Graph(id='price-chart', figure=fig)], id='loading-price-chart',
@@ -123,7 +136,7 @@ app.layout = html.Div(children=[
 # Also, we'll enable the user to adjust the x-axis length and to insert some indicators.
 @ app.callback(
     Output('price-chart', 'figure'),
-#    Input('stocks-dropdown', 'value'),
+    Input('stocks-dropdown', 'value'),
     Input('complements-checklist', 'value'),
     Input('1W-button', 'n_clicks'),
     Input('1M-button', 'n_clicks'),
@@ -131,9 +144,10 @@ app.layout = html.Div(children=[
     Input('6M-button', 'n_clicks'),
     Input('1Y-button', 'n_clicks'),
 )
-def change_price_chart(checklist_values, button_1w, button_1m, button_3m, button_6m, button_1y): #stock
+def change_price_chart(stock, checklist_values, button_1w, button_1m, button_3m, button_6m, button_1y): #stock
     # Retrieving the stock's data.
-    df = yf.download('AAPL', 
+    # APPL, META, GOOG stock
+    df = yf.download(f'{stock}', 
                         start='2018-01-01',
                         end='2018-12-31',
                         progress=False,
@@ -174,7 +188,7 @@ def change_price_chart(checklist_values, button_1w, button_1m, button_3m, button
                 fig.add_trace(go.Scatter(
                     x=df.index, y=df[metric], mode='lines', name=metric, line={'color': colors[metric], 'width': 1}))
     fig.update_layout(
-        paper_bgcolor='black',
+        paper_bgcolor='white',
         font_color='grey',
         height=500,
         width=1000,
