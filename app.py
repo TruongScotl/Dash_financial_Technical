@@ -1,11 +1,9 @@
-from dash import Dash, html, dcc, dash_table, callback_context
+from dash import Dash, html, dcc, callback_context
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
 
 
-
-import cufflinks as cf
 import datetime 
 from dash.dependencies import Input, Output
 import dash_bootstrap_components as dbc
@@ -14,6 +12,8 @@ import dash_bootstrap_components as dbc
 #lib of financial
 import yfinance as yf
 from pandas_ta import bbands
+import talib
+
 
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
@@ -39,25 +39,28 @@ fig = go.Figure(data=[go.Candlestick(x=df_apple.index,
 
 list_stock = ['AAPL', 'GOOG', 'META']
 
-#boilinger_bands
-#fig.add_bollinger_bands(periods=20,boll_std=2,colors=['magenta','grey'],fill=True)
+#ADX candicate defauth = 14. Reason: Lower settings will make the average directional index respond more quickly to price movement but tend to generate more false signals. 
+#Higher settings will minimize false signals but make the average directional index a more lagging indicator.
+df_apple['ADX_14'] = talib.ADX(df_apple['High'], 
+                            df_apple['Low'],
+                            df_apple['Close'])
+
 
 #SMA and EMA
 #fig.add_sma([10,20],width=2,color=['green','lightgreen'],legendgroup=True)
 #fig.add_ema(periods=20, color='green')
 
 #RSI
-#fig.add_rsi(periods=20,color='java')
-
+df_apple['RSI_14'] = talib.RSI(df_apple['Close'])
 
 #MACD
 #fig.add_macd()
 
-min_date = '2018-01-01'
-max_date = '2018-12-31'
+min_date = '2021-01-01'
+max_date = '2021-12-31'
 #fig.iplot(asFigure=True)
-#fig.update_xaxes(range=[min_date, max_date])
-#fig.update_yaxes(tickprefix='$')
+fig.update_xaxes(range=[min_date, max_date])
+fig.update_yaxes(tickprefix='$')
 
 app.layout = html.Div(children=[
     html.H1(children='Technical Analysis'),
@@ -65,11 +68,6 @@ app.layout = html.Div(children=[
 
         html.Div(children='''
         '''),
-
-        # dcc.Graph(
-        #     id='graph1',
-        #     figure=fig
-        # ),  
     ]),
     # New Div for all elements in the new 'row' of the page
     html.Div([
@@ -78,16 +76,15 @@ app.layout = html.Div(children=[
                     dbc.Col([
 
                         html.Label('Select the stock to be displayed'),
-                       #    dcc.Dropdown(available_countries, 'Canada', id='clientside-graph-country'), 
                         dcc.Dropdown(list_stock,
                             id='stocks-dropdown',
                             value='AAPL',
                             className="disabled",
-                            style={'margin-right': '20px'},
+                            style={'margin-right': '20px'}, 
                             searchable=False
                         )
                     ], width=6)
-                ]),
+                    ]),
 
                     dbc.Col([
                         dcc.Loading(
@@ -117,9 +114,11 @@ app.layout = html.Div(children=[
                         # The following checklist mentions the indicators available for use in the dashboard.
                          dbc.Col([
                             dcc.Checklist(
-                                ['Rolling Mean',
+                                ['Moving Average',
                                  'Exponential Rolling Mean',
-                                 'Bollinger Bands'],
+                                 'Bollinger Bands',
+                                 'ADX_14',
+                                 'RSI_14'],
                                 inputStyle={'margin-left': '15px',
                                             'margin-right': '5px'},
                                 id='complements-checklist',
@@ -148,17 +147,24 @@ def change_price_chart(stock, checklist_values, button_1w, button_1m, button_3m,
     # Retrieving the stock's data.
     # APPL, META, GOOG stock
     df = yf.download(f'{stock}', 
-                        start='2018-01-01',
-                        end='2018-12-31',
+                        start='2021-01-01',
+                        end='2021-12-31',
                         progress=False,
                         auto_adjust=True)
-    df['Rolling Mean'] = df['Close'].rolling(window=9).mean()
+    df['Moving Average'] = df['Close'].rolling(window=20).mean()
     df['Exponential Rolling Mean'] = df['Close'].ewm(
         span=9, adjust=False).mean()
-    colors = {'Rolling Mean': '#6fa8dc',
+    df['ADX_14'] = talib.ADX(df['High'], 
+                            df['Low'],
+                            df['Close'])
+    df['RSI_14'] = talib.RSI(df['Close'])
+
+    colors = {'Moving Average': '#6fa8dc',
               'Exponential Rolling Mean': '#03396c', 'Bollinger Bands Low': 'darkorange',
               'Bollinger Bands AVG': 'brown',
-              'Bollinger Bands High': 'darkorange'}
+              'Bollinger Bands High': 'darkorange',
+              'ADX_14': 'royalblue',
+              'RSI_14': 'firebrick'}
     fig = go.Figure(data=[go.Candlestick(x=df.index,
                 open=df['Open'],
                 high=df['High'],
@@ -182,7 +188,14 @@ def change_price_chart(stock, checklist_values, button_1w, button_1m, button_3m,
                 fig.add_trace(go.Scatter(
                     x=df.index, y=df_bbands.iloc[:, 2],
                     mode='lines', name=metric, line={'color': colors['Bollinger Bands High'], 'width': 1}))
-
+            elif metric == 'ADX_14':
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['ADX_14'], 
+                    mode='lines', name=metric, line={'color': colors['ADX_14'], 'width': 1})) 
+            elif metric == 'RSI_14':
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['RSI_14'], 
+                    mode='lines', name=metric, line={'color': colors['RSI_14'], 'width': 1})) 
             # Plotting any of the other metrics remained, if they are chosen.
             else:
                 fig.add_trace(go.Scatter(
