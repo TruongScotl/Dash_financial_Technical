@@ -2,6 +2,7 @@ from dash import Dash, html, dcc, callback_context
 import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
+import numpy as np
 
 
 import datetime 
@@ -12,7 +13,6 @@ import dash_bootstrap_components as dbc
 #lib of financial
 import yfinance as yf
 from pandas_ta import bbands
-import talib
 
 
 
@@ -41,7 +41,73 @@ list_stock = ['AAPL', 'GOOG', 'META']
 
 #ADX candicate defauth = 14. Reason: Lower settings will make the average directional index respond more quickly to price movement but tend to generate more false signals. 
 #Higher settings will minimize false signals but make the average directional index a more lagging indicator.
-df_apple['ADX_14'] = talib.ADX(df_apple['High'], 
+
+def ema(arr, periods=14, weight=1, init=None):
+    leading_na = np.where(~np.isnan(arr))[0][0]
+    arr = arr[leading_na:]
+    alpha = weight / (periods + (weight-1))
+    alpha_rev = 1 - alpha
+    n = arr.shape[0]
+    pows = alpha_rev**(np.arange(n+1))
+    out1 = np.array([])
+    if 0 in pows:
+        out1 = ema(arr[:int(len(arr)/2)], periods)
+        arr = arr[int(len(arr)/2) - 1:]
+        init = out1[-1]
+        n = arr.shape[0]
+        pows = alpha_rev**(np.arange(n+1))
+    scale_arr = 1/pows[:-1]
+    if init:
+        offset = init * pows[1:]
+    else:
+        offset = arr[0]*pows[1:]
+    pw0 = alpha*alpha_rev**(n-1)
+    mult = arr*pw0*scale_arr
+    cumsums = mult.cumsum()
+    out = offset + cumsums*scale_arr[::-1]
+    out = out[1:] if len(out1) > 0 else out
+    out = np.concatenate([out1, out])
+    out[:periods] = np.nan
+    out = np.concatenate(([np.nan]*leading_na, out))
+    return out
+
+
+def atr(highs, lows, closes, periods=14, ema_weight=1):
+    hi = np.array(highs)
+    lo = np.array(lows)
+    c = np.array(closes)
+    tr = np.vstack([np.abs(hi[1:]-c[:-1]),
+                    np.abs(lo[1:]-c[:-1]),
+                    (hi-lo)[1:]]).max(axis=0)
+    atr = ema(tr, periods=periods, weight=ema_weight)
+    atr = np.concatenate([[np.nan], atr])
+    return atr
+
+
+def adx(highs, lows, closes, periods=14):
+    highs = np.array(highs)
+    lows = np.array(lows)
+    closes = np.array(closes)
+    up = highs[1:] - highs[:-1]
+    down = lows[:-1] - lows[1:]
+    up_idx = up > down
+    down_idx = down > up
+    updm = np.zeros(len(up))
+    updm[up_idx] = up[up_idx]
+    updm[updm < 0] = 0
+    downdm = np.zeros(len(down))
+    downdm[down_idx] = down[down_idx]
+    downdm[downdm < 0] = 0
+    _atr = atr(highs, lows, closes, periods)[1:]
+    updi = 100 * ema(updm, periods) / _atr
+    downdi = 100 * ema(downdm, periods) / _atr
+    zeros = (updi + downdi == 0)
+    downdi[zeros] = .0000001
+    adx = 100 * np.abs(updi - downdi) / (updi + downdi)
+    adx = ema(np.concatenate([[np.nan], adx]), periods)
+    return adx
+
+df_apple['ADX_14'] = adx(df_apple['High'], 
                             df_apple['Low'],
                             df_apple['Close'])
 
@@ -51,7 +117,29 @@ df_apple['ADX_14'] = talib.ADX(df_apple['High'],
 #fig.add_ema(periods=20, color='green')
 
 #RSI
-df_apple['RSI_14'] = talib.RSI(df_apple['Close'])
+def rsi(df, periods = 14, ema = True):
+    """
+    Returns a pd.Series with the relative strength index.
+    """
+    close_delta = df['Close'].diff()
+
+    # Make two series: one for lower closes and one for higher closes
+    up = close_delta.clip(lower=0)
+    down = -1 * close_delta.clip(upper=0)
+    
+    if ema == True:
+	    # Use exponential moving average
+        ma_up = up.ewm(com = periods - 1, adjust=True, min_periods = periods).mean()
+        ma_down = down.ewm(com = periods - 1, adjust=True, min_periods = periods).mean()
+    else:
+        # Use simple moving average
+        ma_up = up.rolling(window = periods, adjust=False).mean()
+        ma_down = down.rolling(window = periods, adjust=False).mean()
+        
+    rsi = ma_up / ma_down
+    rsi = 100 - (100/(1 + rsi))
+    return rsi
+df_apple['RSI_14'] = rsi(df_apple)
 
 #MACD
 #fig.add_macd()
@@ -62,41 +150,85 @@ max_date = '2021-12-31'
 fig.update_xaxes(range=[min_date, max_date])
 fig.update_yaxes(tickprefix='$')
 
-app.layout = html.Div(children=[
-    html.H1(children='Technical Analysis'),
-    html.Div([
+# app.layout = html.Div(children=[
+#     html.H1(children='Technical Analysis'),
+#     html.Div([
 
-        html.Div(children='''
-        '''),
-    ]),
-    # New Div for all elements in the new 'row' of the page
-    html.Div([
-        dbc.Row([   
-                    dbc.Row([                    
-                    dbc.Col([
+#         html.Div(children='''
+#         '''),
+#     ]),
+#     # New Div for all elements in the new 'row' of the page
+#     html.Div([
+#         dbc.Row([   
+#                     dbc.Row([                    
+#                     dbc.Col([
 
-                        html.Label('Select the stock to be displayed'),
-                        dcc.Dropdown(list_stock,
+#                         html.Label('Select the stock to be displayed'),
+#                         dcc.Dropdown(list_stock,
+#                             id='stocks-dropdown',
+#                             value='AAPL',
+#                             className="disabled",
+#                             style={'margin-right': '20px'}, 
+#                             searchable=False
+#                         )
+#                     ], width=6)
+#                     ]),
+
+#                     dbc.Col([
+#                         dcc.Loading(
+#                             [dcc.Graph(id='price-chart', figure=fig)], id='loading-price-chart',
+#                             type='dot', color='#1F51FF'),
+
+#                     ]),
+#                     dbc.Row([
+#                         dbc.Col([
+
+#                             # This Div contains the time span buttons for adjustment of the x-axis' length.
+#                             html.Div([
+#                                      html.Button('1W', id='1W-button',
+#                                                  n_clicks=0, className='btn-secondary'),
+#                                      html.Button('1M', id='1M-button',
+#                                                  n_clicks=0, className='btn-secondary'),
+#                                      html.Button('3M', id='3M-button',
+#                                                  n_clicks=0, className='btn-secondary'),
+#                                      html.Button('6M', id='6M-button',
+#                                                  n_clicks=0, className='btn-secondary'),
+#                                      html.Button('1Y', id='1Y-button',
+#                                                  n_clicks=0, className='btn-secondary'),
+
+#                                      ], style={'padding': '15px', 'margin-left': '35px'})
+#                         ], width=4),
+
+#                         # The following checklist mentions the indicators available for use in the dashboard.
+#                          dbc.Col([
+#                             dcc.Checklist(
+#                                 ['Moving Average',
+#                                  'Exponential Rolling Mean',
+#                                  'Bollinger Bands',
+#                                  'ADX_14',
+#                                  'RSI_14'],
+#                                 inputStyle={'margin-left': '15px',
+#                                             'margin-right': '5px'},
+#                                 id='complements-checklist',
+#                                 style={'margin-top': '20px'})
+#                         ], width=8)
+#                     ]),
+#                 ]),
+#     ]),
+# ])
+app.layout = html.Div([ 
+    dbc.Container([ 
+        html.H1("Technical Analysis", style={'align':'center'}),
+        dbc.Row([ 
+            dbc.Col([ 
+                dcc.Dropdown(list_stock,
                             id='stocks-dropdown',
                             value='AAPL',
                             className="disabled",
                             style={'margin-right': '20px'}, 
                             searchable=False
-                        )
-                    ], width=6)
-                    ]),
-
-                    dbc.Col([
-                        dcc.Loading(
-                            [dcc.Graph(id='price-chart', figure=fig)], id='loading-price-chart',
-                            type='dot', color='#1F51FF'),
-
-                    ]),
-                    dbc.Row([
-                        dbc.Col([
-
-                            # This Div contains the time span buttons for adjustment of the x-axis' length.
-                            html.Div([
+                         ),
+                html.Div([
                                      html.Button('1W', id='1W-button',
                                                  n_clicks=0, className='btn-secondary'),
                                      html.Button('1M', id='1M-button',
@@ -108,12 +240,12 @@ app.layout = html.Div(children=[
                                      html.Button('1Y', id='1Y-button',
                                                  n_clicks=0, className='btn-secondary'),
 
-                                     ], style={'padding': '15px', 'margin-left': '35px'})
-                        ], width=4),
-
-                        # The following checklist mentions the indicators available for use in the dashboard.
-                         dbc.Col([
-                            dcc.Checklist(
+                                     ]),
+            ],width=6, md=0,lg=0),
+            html.Br(),
+        dbc.Col([
+            
+            dcc.Checklist(
                                 ['Moving Average',
                                  'Exponential Rolling Mean',
                                  'Bollinger Bands',
@@ -123,12 +255,12 @@ app.layout = html.Div(children=[
                                             'margin-right': '5px'},
                                 id='complements-checklist',
                                 style={'margin-top': '20px'})
-                        ], width=8)
-                    ]),
-                ]),
-    ]),
 
-        
+        ],width=6, md=0,lg=0)
+        ]),
+        html.Br(),
+        dcc.Graph(id='price-chart', figure=fig,style={'boder':'None','width':'100%','align':'center'}),
+    ], fluid=True)
 ])
 
 # A function that will change the data being displayed in the candlestick chart in accordance to the stock selected in the dropdown.
@@ -154,10 +286,14 @@ def change_price_chart(stock, checklist_values, button_1w, button_1m, button_3m,
     df['Moving Average'] = df['Close'].rolling(window=20).mean()
     df['Exponential Rolling Mean'] = df['Close'].ewm(
         span=9, adjust=False).mean()
-    df['ADX_14'] = talib.ADX(df['High'], 
+    # df['ADX_14'] = talib.ADX(df['High'], 
+    #                         df['Low'],
+    #                         df['Close'])
+    df['ADX_14'] = adx(df['High'], 
                             df['Low'],
                             df['Close'])
-    df['RSI_14'] = talib.RSI(df['Close'])
+    # df['RSI_14'] = talib.RSI(df['Close'])
+    df['RSI_14'] = rsi(df)
 
     colors = {'Moving Average': '#6fa8dc',
               'Exponential Rolling Mean': '#03396c', 'Bollinger Bands Low': 'darkorange',
@@ -204,7 +340,7 @@ def change_price_chart(stock, checklist_values, button_1w, button_1m, button_3m,
         paper_bgcolor='white',
         font_color='grey',
         height=500,
-        width=1000,
+        width=1400,
         margin=dict(l=10, r=10, b=5, t=5),
         autosize=False,
         showlegend=False
